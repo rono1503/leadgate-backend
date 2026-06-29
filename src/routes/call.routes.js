@@ -4,17 +4,13 @@ const VoiceResponse = require('twilio').twiml.VoiceResponse
 const { supabaseAdmin } = require('../config/supabase')
 
 /**
- * GET /api/twilio/voice
- * Twilio Voice webhook — inbound call handler.
+ * POST /api/twilio/voice
+ * Twilio Voice webhook — routes calls based on which number was dialed.
  *
- * Flow:
- * 1. Caller dials the LeadGate Twilio number
- * 2. Twilio sends a POST to this webhook
- * 3. We look up the partner by the called number (or ask via menu)
- * 4. We forward the call and log it as a lead
+ * Each partner gets their own tracking number. When someone calls,
+ * we look up the partner by the called number, forward the call,
+ * and log it as a lead.
  */
-
-// ─── Shared Twilio number with partner menu ───
 router.post('/voice', async (req, res) => {
   const twiml = new VoiceResponse()
   const callerNumber = req.body.From || 'unknown'
@@ -22,94 +18,31 @@ router.post('/voice', async (req, res) => {
 
   console.log(`[LeadGate] Inbound call from ${callerNumber} to ${calledNumber}`)
 
-  // Fetch active partners for the menu
+  // Look up partner by their Twilio tracking number
   const { data: partners, error } = await supabaseAdmin
     .from('leadgate_partners')
     .select('id, name, phone')
+    .eq('twilio_number', calledNumber)
     .eq('is_active', true)
-    .order('name')
+    .limit(1)
 
-  if (error || !partners || partners.length === 0) {
-    console.error('[LeadGate] No active partners for call routing:', error?.message)
-    twiml.say('Sorry, no partners are available right now. Please try again later.')
-    twiml.hangup()
-    return res.type('text/xml').send(twiml.toString())
+  if (error) {
+    console.error('[LeadGate] Partner lookup error:', error.message)
   }
 
-  if (partners.length === 1) {
-    // Only one partner — route directly
-    const partner = partners[0]
-    console.log(`[LeadGate] Routing call from ${callerNumber} → ${partner.name} (${partner.phone})`)
-
-    // Log the call as a lead
-    await supabaseAdmin
-      .from('leadgate_leads')
-      .insert({
-        partner_id: partner.id,
-        source: 'phone-call',
-        name: 'Phone Lead',
-        phone: callerNumber,
-        description: `Inbound call from ${callerNumber}`,
-        status: 'new',
-      })
-
-    // Forward the call
-    const dial = twiml.dial({ callerId: calledNumber })
-    dial.number(partner.phone)
-  } else {
-    // Multiple partners — play a menu
-    let menuText = 'Welcome to LeadGate. '
-
-    partners.forEach((p, i) => {
-      menuText += `Press ${i + 1} for ${p.name}. `
-    })
-
-    twiml.gather({
-      numDigits: 1,
-      action: '/api/twilio/voice-menu',
-      method: 'POST',
-      timeout: 10,
-    }, (gatherNode) => {
-      gatherNode.say(menuText)
-    })
-
-    // If no input, say goodbye
-    twiml.say('No option selected. Goodbye.')
-    twiml.hangup()
-  }
-
-  res.type('text/xml').send(twiml.toString())
-})
-
-/**
- * POST /api/twilio/voice-menu
- * Handles DTMF selection from the menu.
- */
-router.post('/voice-menu', async (req, res) => {
-  const twiml = new VoiceResponse()
-  const digit = req.body.Digits
-  const callerNumber = req.body.From || 'unknown'
-
-  // Fetch partners again
-  const { data: partners } = await supabaseAdmin
-    .from('leadgate_partners')
-    .select('id, name, phone')
-    .eq('is_active', true)
-    .order('name')
-
-  const index = parseInt(digit) - 1
-  const partner = partners?.[index]
+  const partner = partners?.[0]
 
   if (!partner) {
-    twiml.say('Invalid selection. Goodbye.')
+    console.log(`[LeadGate] No partner found for number ${calledNumber}`)
+    twiml.say('Thank you for calling LeadGate. Please try your call again or contact the business directly.')
     twiml.hangup()
     return res.type('text/xml').send(twiml.toString())
   }
 
-  console.log(`[LeadGate] Caller ${callerNumber} selected ${partner.name} (option ${digit})`)
+  console.log(`[LeadGate] Routing call from ${callerNumber} → ${partner.name} (${partner.phone})`)
 
-  // Log the call as a lead
-  await supabaseAdmin
+  // Log the lead
+  const { error: leadError } = await supabaseAdmin
     .from('leadgate_leads')
     .insert({
       partner_id: partner.id,
@@ -120,9 +53,13 @@ router.post('/voice-menu', async (req, res) => {
       status: 'new',
     })
 
+  if (leadError) {
+    console.error('[LeadGate] Failed to log lead:', leadError.message)
+  }
+
   // Forward the call
   twiml.say(`Connecting you to ${partner.name}.`)
-  const dial = twiml.dial({ callerId: req.body.To || '' })
+  const dial = twiml.dial({ callerId: calledNumber })
   dial.number(partner.phone)
 
   res.type('text/xml').send(twiml.toString())

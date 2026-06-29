@@ -20,7 +20,7 @@ router.get('/partners', requireAdmin, async (req, res) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('leadgate_partners')
-      .select('id, name, slug, category, city, state, phone, is_active')
+      .select('id, name, slug, category, city, state, phone, twilio_number, is_active')
       .order('name')
 
     if (error) throw error
