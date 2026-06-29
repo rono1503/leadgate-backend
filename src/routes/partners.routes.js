@@ -31,4 +31,34 @@ router.get('/partners', requireAdmin, async (req, res) => {
   }
 })
 
+/**
+ * PATCH /api/partners/:id
+ * Admin — update partner fields (e.g. twilio_number).
+ */
+router.patch('/partners/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const updates = req.body
+    // Only allow updating specific columns
+    const allowed = ['twilio_number', 'phone', 'name', 'slug', 'is_active', 'city', 'state']
+    const clean = {}
+    for (const key of allowed) {
+      if (updates[key] !== undefined) clean[key] = updates[key]
+    }
+    if (Object.keys(clean).length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' })
+    }
+    const { data, error } = await supabaseAdmin
+      .from('leadgate_partners')
+      .update(clean)
+      .eq('id', id)
+      .select()
+    if (error) throw error
+    res.json(data?.[0] || {})
+  } catch (err) {
+    console.error('[LeadGate] Update partner error:', err.message)
+    res.status(500).json({ error: 'Failed to update partner' })
+  }
+})
+
 module.exports = router
