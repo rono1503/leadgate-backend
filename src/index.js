@@ -33,13 +33,6 @@ const leadsRoutes = require('./routes/leads.routes')
 const partnersRoutes = require('./routes/partners.routes')
 const callRoutes = require('./routes/call.routes')
 
-// Debug endpoint
-app.post('/api/debug/body', (req, res) => {
-  console.log('[Debug] Headers:', JSON.stringify(req.headers))
-  console.log('[Debug] Body:', JSON.stringify(req.body))
-  res.json({ headers: req.headers, body: req.body })
-})
-
 app.use('/api', leadsRoutes)
 app.use('/api', partnersRoutes)
 app.use('/api/twilio', callRoutes)
