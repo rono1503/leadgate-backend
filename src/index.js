@@ -30,9 +30,11 @@ app.use(rateLimit({
 // Routes
 const leadsRoutes = require('./routes/leads.routes')
 const partnersRoutes = require('./routes/partners.routes')
+const callRoutes = require('./routes/call.routes')
 
 app.use('/api', leadsRoutes)
 app.use('/api', partnersRoutes)
+app.use('/api/twilio', callRoutes)
 
 // Health check
 app.get('/api/health', (req, res) => {
